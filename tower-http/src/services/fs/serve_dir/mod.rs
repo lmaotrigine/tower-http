@@ -1,4 +1,6 @@
 use self::future::ResponseFuture;
+#[cfg(feature = "include-dir")]
+use self::include_dir::IncludeDirBackend;
 use crate::{
     content_encoding::{encodings, SupportedEncodings},
     set_status::SetStatus,
@@ -23,6 +25,8 @@ use super::{backend::TokioBackend, Backend};
 
 pub(crate) mod future;
 mod headers;
+#[cfg(feature = "include-dir")]
+mod include_dir;
 mod open_file;
 
 #[cfg(test)]
@@ -107,6 +111,24 @@ impl ServeDir<DefaultServeDirFallback<TokioBackend>, TokioBackend> {
             fallback: None,
             call_fallback_on_method_not_allowed: false,
             backend: TokioBackend,
+        }
+    }
+}
+
+#[cfg(feature = "include-dir")]
+impl ServeDir<DefaultServeDirFallback<IncludeDirBackend>, IncludeDirBackend> {
+    /// Create a new [`ServeDir`] that serves files from an `include_dir!` macro.
+    pub fn from_include_dir(dir: &'static ::include_dir::Dir<'static>) -> Self {
+        Self {
+            base: PathBuf::from(""),
+            buf_chunk_size: DEFAULT_CAPACITY,
+            precompressed_variants: None,
+            variant: ServeVariant::Directory {
+                append_index_html_on_directories: true,
+            },
+            fallback: None,
+            call_fallback_on_method_not_allowed: false,
+            backend: IncludeDirBackend::new(dir),
         }
     }
 }
