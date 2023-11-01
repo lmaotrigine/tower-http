@@ -9,11 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Added
 
-- None.
+- **fs:** Add configurable filesystem backends for `ServeDir` and implement an `include_dir` based
+backend.
 
 ## Changed
 
-- Bump Minimum Supported Rust Version to 1.63 ([#418])
+- Bump Minimum Supported Rust Version to 1.64 ([#418])
 
 ## Removed
 
@@ -21,10 +22,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Fixed
 
-- Accepts range headers with ranges where the end of range goes past the end of the document by bumping 
+- Accepts range headers with ranges where the end of range goes past the end of the document by bumping
 http-range-header to `0.4`
 
 [#418]: https://github.com/tower-rs/tower-http/pull/418
+
+# 0.4.4 (September 1, 2023)
+
+## Added
+
+- **trace**: Default implementations for trace bodies.
+
+# 0.4.3 (July 20, 2023)
+
+## Fixed
+
+- **compression:** Fix accidental breaking change in 0.4.2.
 
 # 0.4.2 (July 19, 2023)
 

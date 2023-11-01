@@ -8,6 +8,7 @@ use http::HeaderValue;
 use http_body::Body;
 use pin_project_lite::pin_project;
 use std::{
+    convert::TryInto,
     io,
     pin::Pin,
     task::{Context, Poll},
@@ -347,10 +348,10 @@ pub enum CompressionLevel {
     /// Default quality of compression defined by the selected compression algorithm.
     Default,
     /// Precise quality based on the underlying compression algorithms'
-    /// qualities. The interpretation of this depends on the algorithm chosen
+    /// qualities. The interpretation of this depends on the algorithm.chosen
     /// and the specific implementation backing it.
     /// Qualities are implicitly clamped to the algorithm's maximum.
-    Precise(i32),
+    Precise(u32),
 }
 
 impl Default for CompressionLevel {
@@ -379,7 +380,9 @@ impl CompressionLevel {
             CompressionLevel::Fastest => AsyncCompressionLevel::Fastest,
             CompressionLevel::Best => AsyncCompressionLevel::Best,
             CompressionLevel::Default => AsyncCompressionLevel::Default,
-            CompressionLevel::Precise(quality) => AsyncCompressionLevel::Precise(quality),
+            CompressionLevel::Precise(quality) => {
+                AsyncCompressionLevel::Precise(quality.try_into().unwrap_or(i32::MAX))
+            }
         }
     }
 }
