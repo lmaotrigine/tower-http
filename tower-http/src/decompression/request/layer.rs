@@ -1,64 +1,71 @@
-use super::Decompression;
+use super::service::RequestDecompression;
 use crate::compression_utils::AcceptEncoding;
 use tower_layer::Layer;
 
-/// Decompresses response bodies of the underlying service.
+/// Decompresses request bodies and calls its underlying service.
 ///
-/// This adds the `Accept-Encoding` header to requests and transparently decompresses response
-/// bodies based on the `Content-Encoding` header.
+/// Transparently decompresses request bodies based on the `Content-Encoding` header.
+/// When the encoding in the `Content-Encoding` header is not accepted an `Unsupported Media Type`
+/// status code will be returned with the accepted encodings in the `Accept-Encoding` header.
+///
+/// Enabling pass-through of unaccepted encodings will not return an `Unsupported Media Type`. But
+/// will call the underlying service with the unmodified request if the encoding is not supported.
+/// This is disabled by default.
 ///
 /// See the [module docs](crate::decompression) for more details.
 #[derive(Debug, Default, Clone)]
-pub struct DecompressionLayer {
+pub struct RequestDecompressionLayer {
     accept: AcceptEncoding,
+    pass_through_unaccepted: bool,
 }
 
-impl<S> Layer<S> for DecompressionLayer {
-    type Service = Decompression<S>;
+impl<S> Layer<S> for RequestDecompressionLayer {
+    type Service = RequestDecompression<S>;
 
     fn layer(&self, service: S) -> Self::Service {
-        Decompression {
+        RequestDecompression {
             inner: service,
             accept: self.accept,
+            pass_through_unaccepted: self.pass_through_unaccepted,
         }
     }
 }
 
-impl DecompressionLayer {
-    /// Creates a new `DecompressionLayer`.
+impl RequestDecompressionLayer {
+    /// Creates a new `RequestDecompressionLayer`.
     pub fn new() -> Self {
         Default::default()
     }
 
-    /// Sets whether to request the gzip encoding.
+    /// Sets whether to support gzip encoding.
     #[cfg(feature = "decompression-gzip")]
     pub fn gzip(mut self, enable: bool) -> Self {
         self.accept.set_gzip(enable);
         self
     }
 
-    /// Sets whether to request the Deflate encoding.
+    /// Sets whether to support Deflate encoding.
     #[cfg(feature = "decompression-deflate")]
     pub fn deflate(mut self, enable: bool) -> Self {
         self.accept.set_deflate(enable);
         self
     }
 
-    /// Sets whether to request the Brotli encoding.
+    /// Sets whether to support Brotli encoding.
     #[cfg(feature = "decompression-br")]
     pub fn br(mut self, enable: bool) -> Self {
         self.accept.set_br(enable);
         self
     }
 
-    /// Sets whether to request the Zstd encoding.
+    /// Sets whether to support Zstd encoding.
     #[cfg(feature = "decompression-zstd")]
     pub fn zstd(mut self, enable: bool) -> Self {
         self.accept.set_zstd(enable);
         self
     }
 
-    /// Disables the gzip encoding.
+    /// Disables support for gzip encoding.
     ///
     /// This method is available even if the `gzip` crate feature is disabled.
     pub fn no_gzip(mut self) -> Self {
@@ -66,7 +73,7 @@ impl DecompressionLayer {
         self
     }
 
-    /// Disables the Deflate encoding.
+    /// Disables support for Deflate encoding.
     ///
     /// This method is available even if the `deflate` crate feature is disabled.
     pub fn no_deflate(mut self) -> Self {
@@ -74,7 +81,7 @@ impl DecompressionLayer {
         self
     }
 
-    /// Disables the Brotli encoding.
+    /// Disables support for Brotli encoding.
     ///
     /// This method is available even if the `br` crate feature is disabled.
     pub fn no_br(mut self) -> Self {
@@ -82,11 +89,17 @@ impl DecompressionLayer {
         self
     }
 
-    /// Disables the Zstd encoding.
+    /// Disables support for Zstd encoding.
     ///
     /// This method is available even if the `zstd` crate feature is disabled.
     pub fn no_zstd(mut self) -> Self {
         self.accept.set_zstd(false);
+        self
+    }
+
+    /// Sets whether to pass through the request even when the encoding is not supported.
+    pub fn pass_through_unaccepted(mut self, enable: bool) -> Self {
+        self.pass_through_unaccepted = enable;
         self
     }
 }

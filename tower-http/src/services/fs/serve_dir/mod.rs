@@ -44,6 +44,8 @@ const DEFAULT_CAPACITY: usize = 65536;
 /// - The file doesn't exist
 /// - Any segment of the path contains `..`
 /// - Any segment of the path contains a backslash
+/// - On unix, any segment of the path referenced as directory is actually an
+///   existing file (`/file.html/something`)
 /// - We don't have necessary permissions to read the file
 ///
 /// # Example
@@ -207,6 +209,23 @@ impl<F, B> ServeDir<F, B> {
         self.precompressed_variants
             .get_or_insert(Default::default())
             .deflate = true;
+        self
+    }
+
+    /// Informs the service that it should also look for a precompressed zstd
+    /// version of _any_ file in the directory.
+    ///
+    /// Assuming the `dir` directory is being served and `dir/foo.txt` is requested,
+    /// a client with an `Accept-Encoding` header that allows the zstd encoding
+    /// will receive the file `dir/foo.txt.zst` instead of `dir/foo.txt`.
+    /// If the precompressed file is not available, or the client doesn't support it,
+    /// the uncompressed version will be served instead.
+    /// Both the precompressed version and the uncompressed version are expected
+    /// to be present in the directory. Different precompressed variants can be combined.
+    pub fn precompressed_zstd(mut self) -> Self {
+        self.precompressed_variants
+            .get_or_insert(Default::default())
+            .zstd = true;
         self
     }
 
@@ -572,7 +591,8 @@ impl ServeVariant {
 }
 
 opaque_body! {
-    /// Response body for [`ServeDir`] and [`ServeFile`].
+    /// Response body for [`ServeDir`] and [`ServeFile`][super::ServeFile].
+    #[derive(Default)]
     pub type ResponseBody = UnsyncBoxBody<Bytes, io::Error>;
 }
 
@@ -609,6 +629,7 @@ struct PrecompressedVariants {
     gzip: bool,
     deflate: bool,
     br: bool,
+    zstd: bool,
 }
 
 impl SupportedEncodings for PrecompressedVariants {
@@ -622,5 +643,9 @@ impl SupportedEncodings for PrecompressedVariants {
 
     fn br(&self) -> bool {
         self.br
+    }
+
+    fn zstd(&self) -> bool {
+        self.zstd
     }
 }

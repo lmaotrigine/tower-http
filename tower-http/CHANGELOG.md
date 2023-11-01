@@ -13,21 +13,99 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Changed
 
-- **fs:** `ServeDir` and `ServeFile`'s error types are now `Infallible` and any IO errors
-  will be converted into responses. Use `try_call` to generate error responses manually ([#283])
-- **fs:** `ServeDir::fallback` and `ServeDir::not_found_service` now requires
-  the fallback service to use `Infallible` as its error type ([#283])
+- Bump Minimum Supported Rust Version to 1.63 ([#418])
 
 ## Removed
 
-- Removed `RequireAuthorization` in favor of `ValidateRequest` ([#290])
+- None.
 
 ## Fixed
 
-- None.
+- Accepts range headers with ranges where the end of range goes past the end of the document by bumping 
+http-range-header to `0.4`
 
-[#290]: https://github.com/tower-rs/tower-http/pull/290
+[#418]: https://github.com/tower-rs/tower-http/pull/418
+
+# 0.4.2 (July 19, 2023)
+
+## Added
+
+- **cors:** Add support for private network preflights ([#373])
+- **compression:** Implement `Default` for `DecompressionBody` ([#370])
+
+## Changed
+
+- **compression:** Update to async-compression 0.4 ([#371])
+
+## Fixed
+
+- **compression:** Override default brotli compression level 11 -> 4 ([#356])
+- **trace:** Simplify dynamic tracing level application ([#380])
+- **normalize_path:** Fix path normalization for preceding slashes ([#359])
+
+[#356]: https://github.com/tower-rs/tower-http/pull/356
+[#359]: https://github.com/tower-rs/tower-http/pull/359
+[#370]: https://github.com/tower-rs/tower-http/pull/370
+[#371]: https://github.com/tower-rs/tower-http/pull/371
+[#373]: https://github.com/tower-rs/tower-http/pull/373
+[#380]: https://github.com/tower-rs/tower-http/pull/380
+
+# 0.4.1 (June 20, 2023)
+
+## Added
+
+- **request_id:** Derive `Default` for `MakeRequestUuid` ([#335])
+- **fs:** Derive `Default` for `ServeFileSystemResponseBody` ([#336])
+- **compression:** Expose compression quality on the CompressionLayer ([#333])
+
+## Fixed
+
+- **compression:** Improve parsing of `Accept-Encoding` request header ([#220])
+- **normalize_path:** Fix path normalization of index route ([#347])
+- **decompression:** Enable `multiple_members` for `GzipDecoder` ([#354])
+
+[#347]: https://github.com/tower-rs/tower-http/pull/347
+[#333]: https://github.com/tower-rs/tower-http/pull/333
+[#220]: https://github.com/tower-rs/tower-http/pull/220
+[#335]: https://github.com/tower-rs/tower-http/pull/335
+[#336]: https://github.com/tower-rs/tower-http/pull/336
+[#354]: https://github.com/tower-rs/tower-http/pull/354
+
+# 0.4.0 (February 24, 2023)
+
+## Added
+
+- **decompression:** Add `RequestDecompression` middleware ([#282])
+- **compression:** Implement `Default` for `CompressionBody` ([#323])
+- **compression, decompression:** Support zstd (de)compression ([#322])
+
+## Changed
+
+- **serve_dir:** `ServeDir` and `ServeFile`'s error types are now `Infallible` and any IO errors
+  will be converted into responses. Use `try_call` to generate error responses manually (BREAKING) ([#283])
+- **serve_dir:** `ServeDir::fallback` and `ServeDir::not_found_service` now requires
+  the fallback service to use `Infallible` as its error type (BREAKING) ([#283])
+- **compression, decompression:** Tweak prefered compression encodings ([#325])
+
+## Removed
+
+- Removed `RequireAuthorization` in favor of `ValidateRequest` (BREAKING) ([#290])
+
+## Fixed
+
+- **serve_dir:** Don't include identity in Content-Encoding header ([#317])
+- **compression:** Do compress SVGs ([#321])
+- **serve_dir:** In `ServeDir`, convert `io::ErrorKind::NotADirectory` to `404 Not Found` ([#331])
+
+[#282]: https://github.com/tower-rs/tower-http/pull/282
 [#283]: https://github.com/tower-rs/tower-http/pull/283
+[#290]: https://github.com/tower-rs/tower-http/pull/290
+[#317]: https://github.com/tower-rs/tower-http/pull/317
+[#321]: https://github.com/tower-rs/tower-http/pull/321
+[#322]: https://github.com/tower-rs/tower-http/pull/322
+[#323]: https://github.com/tower-rs/tower-http/pull/323
+[#325]: https://github.com/tower-rs/tower-http/pull/325
+[#331]: https://github.com/tower-rs/tower-http/pull/331
 
 # 0.3.5 (December 02, 2022)
 

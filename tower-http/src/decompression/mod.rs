@@ -1,7 +1,51 @@
-//! Middleware that decompresses response bodies.
+//! Middleware that decompresses request and response bodies.
 //!
-//! # Example
+//! # Examples
 //!
+//! #### Request
+//! ```rust
+//! use bytes::BytesMut;
+//! use flate2::{write::GzEncoder, Compression};
+//! use http::{header, HeaderValue, Request, Response};
+//! use http_body::Body as _; // for Body::data
+//! use hyper::Body;
+//! use std::{error::Error, io::Write};
+//! use tower::{Service, ServiceBuilder, service_fn, ServiceExt};
+//! use tower_http::{BoxError, decompression::{DecompressionBody, RequestDecompressionLayer}};
+//!
+//! # #[tokio::main]
+//! # async fn main() -> Result<(), BoxError> {
+//! // A request encoded with gzip coming from some HTTP client.
+//! let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+//! encoder.write_all(b"Hello?")?;
+//! let request = Request::builder()
+//!     .header(header::CONTENT_ENCODING, "gzip")
+//!     .body(Body::from(encoder.finish()?))?;
+//!
+//! // Our HTTP server
+//! let mut server = ServiceBuilder::new()
+//!     // Automatically decompress request bodies.
+//!     .layer(RequestDecompressionLayer::new())
+//!     .service(service_fn(handler));
+//!
+//! // Send the request, with the gzip encoded body, to our server.
+//! let _response = server.ready().await?.call(request).await?;
+//!
+//! // Handler receives request whose body is decoded when read
+//! async fn handler(mut req: Request<DecompressionBody<Body>>) -> Result<Response<Body>, BoxError>{
+//!     let mut data = BytesMut::new();
+//!     while let Some(chunk) = req.body_mut().data().await {
+//!         let chunk = chunk?;
+//!         data.extend_from_slice(&chunk[..]);
+//!     }
+//!     assert_eq!(data.freeze().to_vec(), b"Hello?");
+//!     Ok(Response::new(Body::from("Hello, World!")))
+//! }
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! #### Response
 //! ```rust
 //! use bytes::BytesMut;
 //! use http::{Request, Response};
@@ -53,6 +97,8 @@
 //! # }
 //! ```
 
+mod request;
+
 mod body;
 mod future;
 mod layer;
@@ -63,11 +109,18 @@ pub use self::{
     service::Decompression,
 };
 
+pub use self::request::future::RequestDecompressionFuture;
+pub use self::request::layer::RequestDecompressionLayer;
+pub use self::request::service::RequestDecompression;
+
 #[cfg(test)]
 mod tests {
+    use std::io::Write;
+
     use super::*;
     use crate::compression::Compression;
     use bytes::BytesMut;
+    use flate2::write::GzEncoder;
     use http::Response;
     use http_body::Body as _;
     use hyper::{Body, Client, Error, Request};
@@ -95,8 +148,46 @@ mod tests {
         assert_eq!(decompressed_data, "Hello, World!");
     }
 
+    #[tokio::test]
+    async fn decompress_multi_gz() {
+        let mut client = Decompression::new(service_fn(handle_multi_gz));
+
+        let req = Request::builder()
+            .header("accept-encoding", "gzip")
+            .body(Body::empty())
+            .unwrap();
+        let res = client.ready().await.unwrap().call(req).await.unwrap();
+
+        // read the body, it will be decompressed automatically
+        let mut body = res.into_body();
+        let mut data = BytesMut::new();
+        while let Some(chunk) = body.data().await {
+            let chunk = chunk.unwrap();
+            data.extend_from_slice(&chunk[..]);
+        }
+        let decompressed_data = String::from_utf8(data.freeze().to_vec()).unwrap();
+
+        assert_eq!(decompressed_data, "Hello, World!");
+    }
+
     async fn handle(_req: Request<Body>) -> Result<Response<Body>, Error> {
         Ok(Response::new(Body::from("Hello, World!")))
+    }
+
+    async fn handle_multi_gz(_req: Request<Body>) -> Result<Response<Body>, Error> {
+        let mut buf = Vec::new();
+        let mut enc1 = GzEncoder::new(&mut buf, Default::default());
+        enc1.write_all(b"Hello, ").unwrap();
+        enc1.finish().unwrap();
+
+        let mut enc2 = GzEncoder::new(&mut buf, Default::default());
+        enc2.write_all(b"World!").unwrap();
+        enc2.finish().unwrap();
+
+        let mut res = Response::new(Body::from(buf));
+        res.headers_mut()
+            .insert("content-encoding", "gzip".parse().unwrap());
+        Ok(res)
     }
 
     #[allow(dead_code)]

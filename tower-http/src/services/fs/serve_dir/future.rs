@@ -3,6 +3,7 @@ use super::{
     ResponseBody,
 };
 use crate::{
+    content_encoding::Encoding,
     services::fs::{AsyncReadBody, Backend, Metadata as _},
     BoxError,
 };
@@ -27,7 +28,7 @@ use std::{
 use tower_service::Service;
 
 pin_project! {
-    /// Response future of [`ServeDir::try_call`].
+    /// Response future of [`ServeDir::try_call()`][`super::ServeDir::try_call()`].
     pub struct ResponseFuture<ReqBody, F, B: Backend> {
         #[pin]
         pub(super) inner: ResponseFutureInner<ReqBody, F, B>,
@@ -128,8 +129,19 @@ where
                     }
 
                     Err(err) => {
-                        if let io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied =
-                            err.kind()
+                        #[cfg(unix)]
+                        // 20 = libc::ENOTDIR => "not a directory
+                        // when `io_error_more` landed, this can be changed
+                        // to checking for `io::ErrorKind::NotADirectory`.
+                        // https://github.com/rust-lang/rust/issues/86442
+                        let error_is_not_a_directory = err.raw_os_error() == Some(20);
+                        #[cfg(not(unix))]
+                        let error_is_not_a_directory = false;
+
+                        if matches!(
+                            err.kind(),
+                            io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied
+                        ) || error_is_not_a_directory
                         {
                             if let Some((mut fallback, request)) = fallback_and_request.take() {
                                 call_fallback(&mut fallback, request)
@@ -222,7 +234,10 @@ where
         .header(header::CONTENT_TYPE, output.mime_header_value)
         .header(header::ACCEPT_RANGES, "bytes");
 
-    if let Some(encoding) = output.maybe_encoding {
+    if let Some(encoding) = output
+        .maybe_encoding
+        .filter(|encoding| *encoding != Encoding::Identity)
+    {
         builder = builder.header(header::CONTENT_ENCODING, encoding.into_header_value());
     }
 

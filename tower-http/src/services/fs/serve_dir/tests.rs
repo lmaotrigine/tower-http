@@ -298,6 +298,27 @@ async fn not_found() {
     assert!(body.is_empty());
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn not_found_when_not_a_directory() {
+    let svc = ServeDir::new("../test-files");
+
+    // `index.html` is a file, and we are trying to request
+    // it as a directory.
+    let req = Request::builder()
+        .uri("/index.html/some_file")
+        .body(Body::empty())
+        .unwrap();
+    let res = svc.oneshot(req).await.unwrap();
+
+    // This should lead to a 404
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    assert!(res.headers().get(header::CONTENT_TYPE).is_none());
+
+    let body = body_into_text(res.into_body()).await;
+    assert!(body.is_empty());
+}
+
 #[tokio::test]
 async fn not_found_precompressed() {
     let svc = ServeDir::new("../test-files").precompressed_gzip();
@@ -468,7 +489,7 @@ async fn read_partial_in_bounds() {
 }
 
 #[tokio::test]
-async fn read_partial_rejects_out_of_bounds_range() {
+async fn read_partial_accepts_out_of_bounds_range() {
     let svc = ServeDir::new("..");
     let bytes_start_incl = 0;
     let bytes_end_excl = 9999999;
@@ -484,11 +505,16 @@ async fn read_partial_rejects_out_of_bounds_range() {
         .unwrap();
     let res = svc.oneshot(req).await.unwrap();
 
-    assert_eq!(res.status(), StatusCode::RANGE_NOT_SATISFIABLE);
+    assert_eq!(res.status(), StatusCode::PARTIAL_CONTENT);
     let file_contents = std::fs::read("../README.md").unwrap();
+    // Out of bounds range gives all bytes
     assert_eq!(
         res.headers()["content-range"],
-        &format!("bytes */{}", file_contents.len())
+        &format!(
+            "bytes 0-{}/{}",
+            file_contents.len() - 1,
+            file_contents.len()
+        )
     )
 }
 
@@ -525,6 +551,21 @@ async fn read_partial_errs_on_bad_range() {
         &format!("bytes */{}", file_contents.len())
     )
 }
+
+#[tokio::test]
+async fn accept_encoding_identity() {
+    let svc = ServeDir::new("..");
+    let req = Request::builder()
+        .uri("/README.md")
+        .header("Accept-Encoding", "identity")
+        .body(Body::empty())
+        .unwrap();
+    let res = svc.oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    // Identity encoding should not be included in the response headers
+    assert!(res.headers().get("content-encoding").is_none());
+}
+
 #[tokio::test]
 async fn last_modified() {
     let svc = ServeDir::new("..");

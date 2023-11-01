@@ -80,18 +80,23 @@ pub use self::{
     predicate::{DefaultPredicate, Predicate},
     service::Compression,
 };
+pub use crate::compression_utils::CompressionLevel;
 
 #[cfg(test)]
 mod tests {
+    use crate::compression::predicate::SizeAbove;
+
     use super::*;
     use async_compression::tokio::write::{BrotliDecoder, BrotliEncoder};
     use bytes::BytesMut;
     use flate2::read::GzDecoder;
+    use http::header::{ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_TYPE};
     use http_body::Body as _;
     use hyper::{Body, Error, Request, Response, Server};
     use std::sync::{Arc, RwLock};
     use std::{io::Read, net::SocketAddr};
-    use tokio::io::AsyncWriteExt;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio_util::io::StreamReader;
     use tower::{make::Shared, service_fn, Service, ServiceExt};
 
     // Compression filter allows every other request to be compressed
@@ -108,7 +113,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn works() {
+    async fn gzip_works() {
         let svc = service_fn(handle);
         let mut svc = Compression::new(svc).compress_when(Always);
 
@@ -134,6 +139,34 @@ mod tests {
         let mut decoder = GzDecoder::new(&compressed_data[..]);
         let mut decompressed = String::new();
         decoder.read_to_string(&mut decompressed).unwrap();
+
+        assert_eq!(decompressed, "Hello, World!");
+    }
+
+    #[tokio::test]
+    async fn zstd_works() {
+        let svc = service_fn(handle);
+        let mut svc = Compression::new(svc).compress_when(Always);
+
+        // call the service
+        let req = Request::builder()
+            .header("accept-encoding", "zstd")
+            .body(Body::empty())
+            .unwrap();
+        let res = svc.ready().await.unwrap().call(req).await.unwrap();
+
+        // read the compressed body
+        let mut body = res.into_body();
+        let mut data = BytesMut::new();
+        while let Some(chunk) = body.data().await {
+            let chunk = chunk.unwrap();
+            data.extend_from_slice(&chunk[..]);
+        }
+        let compressed_data = data.freeze().to_vec();
+
+        // decompress the body
+        let decompressed = zstd::stream::decode_all(std::io::Cursor::new(compressed_data)).unwrap();
+        let decompressed = String::from_utf8(decompressed).unwrap();
 
         assert_eq!(decompressed, "Hello, World!");
     }
@@ -280,5 +313,107 @@ mod tests {
             data.extend_from_slice(&chunk[..]);
         }
         assert!(String::from_utf8(data.to_vec()).is_err());
+    }
+
+    #[tokio::test]
+    async fn doesnt_compress_images() {
+        async fn handle(_req: Request<Body>) -> Result<Response<Body>, Error> {
+            let mut res = Response::new(Body::from(
+                "a".repeat((SizeAbove::DEFAULT_MIN_SIZE * 2) as usize),
+            ));
+            res.headers_mut()
+                .insert(CONTENT_TYPE, "image/png".parse().unwrap());
+            Ok(res)
+        }
+
+        let svc = Compression::new(service_fn(handle));
+
+        let res = svc
+            .oneshot(
+                Request::builder()
+                    .header(ACCEPT_ENCODING, "gzip")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(res.headers().get(CONTENT_ENCODING).is_none());
+    }
+
+    #[tokio::test]
+    async fn does_compress_svg() {
+        async fn handle(_req: Request<Body>) -> Result<Response<Body>, Error> {
+            let mut res = Response::new(Body::from(
+                "a".repeat((SizeAbove::DEFAULT_MIN_SIZE * 2) as usize),
+            ));
+            res.headers_mut()
+                .insert(CONTENT_TYPE, "image/svg+xml".parse().unwrap());
+            Ok(res)
+        }
+
+        let svc = Compression::new(service_fn(handle));
+
+        let res = svc
+            .oneshot(
+                Request::builder()
+                    .header(ACCEPT_ENCODING, "gzip")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.headers()[CONTENT_ENCODING], "gzip");
+    }
+
+    #[tokio::test]
+    async fn compress_with_quality() {
+        const DATA: &str = "Check compression quality level! Check compression quality level! Check compression quality level!";
+        let level = CompressionLevel::Best;
+
+        let svc = service_fn(|_| async {
+            let resp = Response::builder()
+                .body(Body::from(DATA.as_bytes()))
+                .unwrap();
+            Ok::<_, std::io::Error>(resp)
+        });
+
+        let mut svc = Compression::new(svc).quality(level);
+
+        // call the service
+        let req = Request::builder()
+            .header("accept-encoding", "br")
+            .body(Body::empty())
+            .unwrap();
+        let res = svc.ready().await.unwrap().call(req).await.unwrap();
+
+        // read the compressed body
+        let mut body = res.into_body();
+        let mut data = BytesMut::new();
+        while let Some(chunk) = body.data().await {
+            let chunk = chunk.unwrap();
+            data.extend_from_slice(&chunk[..]);
+        }
+        let compressed_data = data.freeze().to_vec();
+
+        // build the compressed body with the same quality level
+        let compressed_with_level = {
+            use async_compression::tokio::bufread::BrotliEncoder;
+
+            let stream = Box::pin(futures::stream::once(async move {
+                Ok::<_, std::io::Error>(DATA.as_bytes())
+            }));
+            let reader = StreamReader::new(stream);
+            let mut enc = BrotliEncoder::with_quality(reader, level.into_async_compression());
+
+            let mut buf = Vec::new();
+            enc.read_to_end(&mut buf).await.unwrap();
+            buf
+        };
+
+        assert_eq!(
+            compressed_data.as_slice(),
+            compressed_with_level.as_slice(),
+            "Compression level is not respected"
+        );
     }
 }

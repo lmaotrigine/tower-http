@@ -1,5 +1,6 @@
 use super::{CompressionBody, CompressionLayer, ResponseFuture};
 use crate::compression::predicate::{DefaultPredicate, Predicate};
+use crate::compression::CompressionLevel;
 use crate::{compression_utils::AcceptEncoding, content_encoding::Encoding};
 use http::{Request, Response};
 use http_body::Body;
@@ -17,6 +18,7 @@ pub struct Compression<S, P = DefaultPredicate> {
     pub(crate) inner: S,
     pub(crate) accept: AcceptEncoding,
     pub(crate) predicate: P,
+    pub(crate) quality: CompressionLevel,
 }
 
 impl<S> Compression<S, DefaultPredicate> {
@@ -26,6 +28,7 @@ impl<S> Compression<S, DefaultPredicate> {
             inner: service,
             accept: AcceptEncoding::default(),
             predicate: DefaultPredicate::default(),
+            quality: CompressionLevel::default(),
         }
     }
 }
@@ -61,6 +64,19 @@ impl<S, P> Compression<S, P> {
         self
     }
 
+    /// Sets whether to enable the Zstd encoding.
+    #[cfg(feature = "compression-zstd")]
+    pub fn zstd(mut self, enable: bool) -> Self {
+        self.accept.set_zstd(enable);
+        self
+    }
+
+    /// Sets the compression quality.
+    pub fn quality(mut self, quality: CompressionLevel) -> Self {
+        self.quality = quality;
+        self
+    }
+
     /// Disables the gzip encoding.
     ///
     /// This method is available even if the `gzip` crate feature is disabled.
@@ -82,6 +98,14 @@ impl<S, P> Compression<S, P> {
     /// This method is available even if the `br` crate feature is disabled.
     pub fn no_br(mut self) -> Self {
         self.accept.set_br(false);
+        self
+    }
+
+    /// Disables the Zstd encoding.
+    ///
+    /// This method is available even if the `zstd` crate feature is disabled.
+    pub fn no_zstd(mut self) -> Self {
+        self.accept.set_zstd(false);
         self
     }
 
@@ -128,6 +152,7 @@ impl<S, P> Compression<S, P> {
             inner: self.inner,
             accept: self.accept,
             predicate,
+            quality: self.quality,
         }
     }
 }
@@ -154,6 +179,7 @@ where
             inner: self.inner.call(req),
             encoding,
             predicate: self.predicate.clone(),
+            quality: self.quality,
         }
     }
 }

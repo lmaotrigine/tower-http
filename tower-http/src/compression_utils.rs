@@ -20,20 +20,29 @@ pub(crate) struct AcceptEncoding {
     pub(crate) gzip: bool,
     pub(crate) deflate: bool,
     pub(crate) br: bool,
+    pub(crate) zstd: bool,
 }
 
 impl AcceptEncoding {
     #[allow(dead_code)]
     pub(crate) fn to_header_value(self) -> Option<HeaderValue> {
-        let accept = match (self.gzip(), self.deflate(), self.br()) {
-            (true, true, true) => "gzip,deflate,br",
-            (true, true, false) => "gzip,deflate",
-            (true, false, true) => "gzip,br",
-            (true, false, false) => "gzip",
-            (false, true, true) => "deflate,br",
-            (false, true, false) => "deflate",
-            (false, false, true) => "br",
-            (false, false, false) => return None,
+        let accept = match (self.gzip(), self.deflate(), self.br(), self.zstd()) {
+            (true, true, true, false) => "gzip,deflate,br",
+            (true, true, false, false) => "gzip,deflate",
+            (true, false, true, false) => "gzip,br",
+            (true, false, false, false) => "gzip",
+            (false, true, true, false) => "deflate,br",
+            (false, true, false, false) => "deflate",
+            (false, false, true, false) => "br",
+            (true, true, true, true) => "zstd,gzip,deflate,br",
+            (true, true, false, true) => "zstd,gzip,deflate",
+            (true, false, true, true) => "zstd,gzip,br",
+            (true, false, false, true) => "zstd,gzip",
+            (false, true, true, true) => "zstd,deflate,br",
+            (false, true, false, true) => "zstd,deflate",
+            (false, false, true, true) => "zstd,br",
+            (false, false, false, true) => "zstd",
+            (false, false, false, false) => return None,
         };
         Some(HeaderValue::from_static(accept))
     }
@@ -51,6 +60,11 @@ impl AcceptEncoding {
     #[allow(dead_code)]
     pub(crate) fn set_br(&mut self, enable: bool) {
         self.br = enable;
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn set_zstd(&mut self, enable: bool) {
+        self.zstd = enable;
     }
 }
 
@@ -90,6 +104,18 @@ impl SupportedEncodings for AcceptEncoding {
             false
         }
     }
+
+    #[allow(dead_code)]
+    fn zstd(&self) -> bool {
+        #[cfg(any(feature = "decompression-zstd", feature = "compression-zstd"))]
+        {
+            self.zstd
+        }
+        #[cfg(not(any(feature = "decompression-zstd", feature = "compression-zstd")))]
+        {
+            false
+        }
+    }
 }
 
 impl Default for AcceptEncoding {
@@ -98,6 +124,7 @@ impl Default for AcceptEncoding {
             gzip: true,
             deflate: true,
             br: true,
+            zstd: true,
         }
     }
 }
@@ -112,7 +139,7 @@ pub(crate) trait DecorateAsyncRead {
     type Output: AsyncRead;
 
     /// Apply the decorator
-    fn apply(input: Self::Input) -> Self::Output;
+    fn apply(input: Self::Input, quality: CompressionLevel) -> Self::Output;
 
     /// Get a pinned mutable reference to the original input.
     ///
@@ -130,7 +157,7 @@ pin_project! {
 
 impl<M: DecorateAsyncRead> WrapBody<M> {
     #[allow(dead_code)]
-    pub(crate) fn new<B>(body: B) -> Self
+    pub(crate) fn new<B>(body: B, quality: CompressionLevel) -> Self
     where
         B: Body,
         M: DecorateAsyncRead<Input = AsyncReadBody<B>>,
@@ -145,8 +172,8 @@ impl<M: DecorateAsyncRead> WrapBody<M> {
         // convert `Stream` into an `AsyncRead`
         let read = StreamReader::new(stream);
 
-        // apply decorator to `AsyncRead` yieling another `AsyncRead`
-        let read = M::apply(read);
+        // apply decorator to `AsyncRead` yielding another `AsyncRead`
+        let read = M::apply(read, quality);
 
         Self { read }
     }
@@ -308,3 +335,51 @@ where
 }
 
 pub(crate) const SENTINEL_ERROR_CODE: i32 = -837459418;
+
+/// Level of compression data should be compressed with.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CompressionLevel {
+    /// Fastest quality of compression, usually produces bigger size.
+    Fastest,
+    /// Best quality of compression, usually produces the smallest size.
+    Best,
+    /// Default quality of compression defined by the selected compression algorithm.
+    Default,
+    /// Precise quality based on the underlying compression algorithms'
+    /// qualities. The interpretation of this depends on the algorithm chosen
+    /// and the specific implementation backing it.
+    /// Qualities are implicitly clamped to the algorithm's maximum.
+    Precise(i32),
+}
+
+impl Default for CompressionLevel {
+    fn default() -> Self {
+        CompressionLevel::Default
+    }
+}
+
+#[cfg(any(
+    feature = "compression-br",
+    feature = "compression-gzip",
+    feature = "compression-deflate",
+    feature = "compression-zstd"
+))]
+use async_compression::Level as AsyncCompressionLevel;
+
+#[cfg(any(
+    feature = "compression-br",
+    feature = "compression-gzip",
+    feature = "compression-deflate",
+    feature = "compression-zstd"
+))]
+impl CompressionLevel {
+    pub(crate) fn into_async_compression(self) -> AsyncCompressionLevel {
+        match self {
+            CompressionLevel::Fastest => AsyncCompressionLevel::Fastest,
+            CompressionLevel::Best => AsyncCompressionLevel::Best,
+            CompressionLevel::Default => AsyncCompressionLevel::Default,
+            CompressionLevel::Precise(quality) => AsyncCompressionLevel::Precise(quality),
+        }
+    }
+}

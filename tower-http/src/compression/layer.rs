@@ -1,5 +1,6 @@
 use super::{Compression, Predicate};
 use crate::compression::predicate::DefaultPredicate;
+use crate::compression::CompressionLevel;
 use crate::compression_utils::AcceptEncoding;
 use tower_layer::Layer;
 
@@ -13,6 +14,7 @@ use tower_layer::Layer;
 pub struct CompressionLayer<P = DefaultPredicate> {
     accept: AcceptEncoding,
     predicate: P,
+    quality: CompressionLevel,
 }
 
 impl<S, P> Layer<S> for CompressionLayer<P>
@@ -26,6 +28,7 @@ where
             inner,
             accept: self.accept,
             predicate: self.predicate.clone(),
+            quality: self.quality,
         }
     }
 }
@@ -57,6 +60,19 @@ impl CompressionLayer {
         self
     }
 
+    /// Sets whether to enable the Zstd encoding.
+    #[cfg(feature = "compression-zstd")]
+    pub fn zstd(mut self, enable: bool) -> Self {
+        self.accept.set_zstd(enable);
+        self
+    }
+
+    /// Sets the compression quality.
+    pub fn quality(mut self, quality: CompressionLevel) -> Self {
+        self.quality = quality;
+        self
+    }
+
     /// Disables the gzip encoding.
     ///
     /// This method is available even if the `gzip` crate feature is disabled.
@@ -81,6 +97,14 @@ impl CompressionLayer {
         self
     }
 
+    /// Disables the Zstd encoding.
+    ///
+    /// This method is available even if the `zstd` crate feature is disabled.
+    pub fn no_zstd(mut self) -> Self {
+        self.accept.set_zstd(false);
+        self
+    }
+
     /// Replace the current compression predicate.
     ///
     /// See [`Compression::compress_when`] for more details.
@@ -91,6 +115,7 @@ impl CompressionLayer {
         CompressionLayer {
             accept: self.accept,
             predicate,
+            quality: self.quality,
         }
     }
 }
@@ -121,7 +146,10 @@ mod tests {
 
     #[tokio::test]
     async fn accept_encoding_configuration_works() -> Result<(), crate::BoxError> {
-        let deflate_only_layer = CompressionLayer::new().no_br().no_gzip();
+        let deflate_only_layer = CompressionLayer::new()
+            .quality(CompressionLevel::Best)
+            .no_br()
+            .no_gzip();
 
         let mut service = ServiceBuilder::new()
             // Compress responses based on the `Accept-Encoding` header.
@@ -148,7 +176,10 @@ mod tests {
 
         let deflate_bytes_len = bytes.len();
 
-        let br_only_layer = CompressionLayer::new().no_gzip().no_deflate();
+        let br_only_layer = CompressionLayer::new()
+            .quality(CompressionLevel::Best)
+            .no_gzip()
+            .no_deflate();
 
         let mut service = ServiceBuilder::new()
             // Compress responses based on the `Accept-Encoding` header.
